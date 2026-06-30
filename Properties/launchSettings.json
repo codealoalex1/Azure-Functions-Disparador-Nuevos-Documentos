@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Azure_Functions_Disparador_Nuevos_Documentos": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7081",
+      "launchBrowser": false
+    }
+  }
+}
