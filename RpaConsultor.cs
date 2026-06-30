@@ -21,7 +21,7 @@ public class RpaConsultor
 
     [Function("VerificarNuevosArchivos")]
     public async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = "blobs/procesar-json")] HttpRequest req)
+            [HttpTrigger(AuthorizationLevel.Function, "get", "post" /*, Route = "blobs/procesar-json" */)] HttpRequest req)
     {
         _logger.LogInformation("Iniciando escaneo de archivos JSON en todas las carpetas.");
 
