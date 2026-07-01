@@ -32,23 +32,21 @@ public class RpaConsultor
 
         try
         {
-            // GetBlobsAsync recorre de forma plana/recursiva todas las "carpetas" por defecto
+            /* Iterar sobre todos los archivos obtenidos en el contenedor */
             await foreach (BlobItem blobItem in containerClient.GetBlobsAsync())
             {
-                // 1. Filtrar para asegurarnos de que sea un archivo .json
+                /* Filtrar unicamente .json */
                 if (blobItem.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                 {
+                    /* Filtrar unicamente el archivo nuevo.json, si no existe, no se muestra nada sobre este sitio */
+                    if (blobItem.Name.Split("/")[1] != "nuevo.json") { continue; }
                     _logger.LogInformation($"Archivo JSON encontrado en la ruta: {blobItem.Name}");
 
-                    // Obtener la referencia al cliente del blob específico
                     var blobClient = containerClient.GetBlobClient(blobItem.Name);
 
-                    // 2. Leer o descargar el contenido del archivo JSON
                     var descarga = await blobClient.DownloadContentAsync();
                     string contenidoJson = descarga.Value.Content.ToString();
 
-                    // 3. Aquí ya tienes el JSON. Puedes guardarlo en una lista, 
-                    // deserializarlo en un objeto de C#, o procesarlo directamente.
                     using (JsonDocument doc = JsonDocument.Parse(contenidoJson))
                     {
                         JsonElement root = doc.RootElement.Clone();
