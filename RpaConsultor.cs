@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Microsoft.AspNetCore.Http;
@@ -23,9 +24,9 @@ public class RpaConsultor
     public async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Function, "get", "post" /*, Route = "blobs/procesar-json" */)] HttpRequest req)
     {
-        _logger.LogInformation("Iniciando escaneo de archivos JSON en todas las carpetas.");
+        _logger.LogInformation("Iniciando escaneo, filtrado y actualización de archivos JSON.");
 
-        string containerName = "registros-json"; // Tu contenedor
+        string containerName = "registros-json";
         var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
 
         List<object> listaResultados = new List<object>();
@@ -35,39 +36,70 @@ public class RpaConsultor
             /* Iterar sobre todos los archivos obtenidos en el contenedor */
             await foreach (BlobItem blobItem in containerClient.GetBlobsAsync())
             {
-                /* Filtrar unicamente .json */
+                /* Filtrar únicamente .json */
                 if (blobItem.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                 {
-                    /* Filtrar unicamente el archivo nuevo.json, si no existe, no se muestra nada sobre este sitio */
-                    if (blobItem.Name.Split("/")[1] != "nuevo.json") { continue; }
-                    _logger.LogInformation($"Archivo JSON encontrado en la ruta: {blobItem.Name}");
-
                     var blobClient = containerClient.GetBlobClient(blobItem.Name);
 
+                    // 1. Descargar el contenido actual
                     var descarga = await blobClient.DownloadContentAsync();
                     string contenidoJson = descarga.Value.Content.ToString();
 
-                    using (JsonDocument doc = JsonDocument.Parse(contenidoJson))
+                    // 2. Parsear como un JsonNode
+                    var jsonNode = JsonNode.Parse(contenidoJson);
+
+                    if (jsonNode is JsonObject jsonObject)
                     {
-                        JsonElement root = doc.RootElement.Clone();
+                        // 3. VALIDACIÓN: Si "Procesado" existe y es true, ignoramos el archivo
+                        if (jsonObject.TryGetPropertyValue("Procesado", out var nodoProcesado) &&
+                            nodoProcesado != null &&
+                            (bool)nodoProcesado.AsValue())
+                        {
+                            _logger.LogInformation($"El archivo {blobItem.Name} ya fue procesado previamente");
+                            continue; // Salta al siguiente archivo del bucle foreach
+                        }
+
+                        // --- Lógica para archivos NUEVOS o NO PROCESADOS ---
+                        _logger.LogInformation($"Procesando archivo nuevo: {blobItem.Name}");
+
+                        // 4. Modificar o añadir la propiedad "Procesado"
+                        jsonObject["Procesado"] = true;
+                        jsonObject["FechaProcesamiento"] = DateTime.UtcNow.ToString("o");
+
+                        // 5. Convertir el objeto modificado nuevamente a un string JSON
+                        string jsonActualizado = jsonObject.ToJsonString(new JsonSerializerOptions
+                        {
+                            WriteIndented = true
+                        });
+
+                        // 6. Sobrescribir el archivo en Azure Blob Storage
+                        await blobClient.UploadAsync(new BinaryData(jsonActualizado), overwrite: true);
+
+                        _logger.LogInformation($"Archivo {blobItem.Name} procesado y guardado exitosamente.");
 
                         listaResultados.Add(new
                         {
-                            Datos = root
+                            Ruta = blobItem.Name,
+                            Datos = jsonObject
                         });
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"El archivo {blobItem.Name} no tiene una estructura de objeto JSON válida.");
                     }
                 }
             }
 
             return new OkObjectResult(new
             {
-                TotalProcesados = listaResultados.Count,
-                Archivos = listaResultados
+                Mensaje = "Proceso completado.",
+                TotalNuevosProcesados = listaResultados.Count,
+                ArchivosProcesadosEnEstaTanda = listaResultados
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error procesando los blobs: {ex.Message}");
+            _logger.LogError($"Error procesando o actualizando los blobs: {ex.Message}");
             return new StatusCodeResult(StatusCodes.Status500InternalServerError);
         }
     }
